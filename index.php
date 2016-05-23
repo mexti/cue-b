@@ -1,16 +1,16 @@
 <?php
 // Initialisation
-//if(isset($_GET['debug'])) {
+if(isset($_GET['debug'])) {
 	ini_set('display_errors',1);
 	error_reporting(E_ALL);
-//}
+}
 ob_flush();
 define('Qb_Started',true);
 
 // Autoload classes
 function __autoload($class) {
-	if(file_exists("class/".strtolower($class).".class.php")) {
-		require_once("class/".strtolower($class).".class.php");
+	if(file_exists($_SERVER['DOCUMENT_ROOT']."/lib/class/".strtolower($class).".class.php")) {
+		require_once($_SERVER['DOCUMENT_ROOT']."/lib/class/".strtolower($class).".class.php");
 	}
 	class_exists($class) || trigger_error("Could not load class {$class} in ".__FUNCTION__,E_USER_ERROR);
 }
@@ -31,37 +31,64 @@ $_db->connected() || trigger_error("Could not connect to database from ".__FILE_
 $settings = new Setting();
 $settings->get();
 
+// Load user details
+empty($_SESSION['user']) || $_user = new User($_SESSION['user']->id);
+
 function process_url($url) {
 	global $_db;
 	$pieces = explode('/',$url);
 	$found = array();
-	$lngfilter = $catfilter = $filter = "";
+	$lanfilter = $catfilter = "";
 	$level = 0;
-	unset($pieces[0]);
+	//unset($pieces[0]);
 	foreach($pieces as $piece) {
 		$_db->select("`name`,`table`")->from("`components`")->where("`level`>'{$level}'");
 		$objects = $_db->load();
 		foreach($objects as $object) {
-			$_db->select("`id`")->from("`{$object['table']}`")->where("`name`='{$piece}'{$lngfilter}{$catfilter}")->limit("1");
-			echo "{$object['table']} where `name`='{$piece}'{$lngfilter}{$catfilter} <br>";
+			$_db->select("`id`")->from("`{$object['table']}`")->where("`name`='{$piece}'{$lanfilter}{$catfilter}")->limit("1");
 			$match = $_db->loadObject();
 			if(!empty($match)) {
-				$found["{$object['name']}:{$match->id}"] = $level;
+				$found["{$object['name']}:{$match->id}"] = array('level'=>$level,'object'=>$object['name'],'id'=>$match->id,'name'=>"{$piece}",'slug'=>"{\"object\":\"{$object['name']}\",\"id\":\"{$match->id}\"}");
 				break;
 			}
 			$object['name'] = "not-found";
 		}
-		if($object['name']=='language') $langfilter = " AND `{$object['name']}`='{$match->id}'";
+		if($object['name']=='language') $lanfilter = " AND `{$object['name']}`='{$match->id}'";
 		elseif($object['name']=='article') return $found;
-		else $catfilter = " AND `{$object['name']}`='{$match->id}'";
-		$filter = $langfilter.$catfilter;
+		else $catfilter = " AND `parent`='{$match->id}'";
 		$level++;
 	}
 	return $found;
 }
 
-$path = process_url($_SERVER['REQUEST_URI']));
+// Check if user needs to log on
+if(isset($_GET['logon'])) {
+	$_SESSION['alerts'][] = (object)['type'=>'warning','error'=>'0','message'=>"This page requires you to log on. Please provide your account and password.",'fade'=>true];
+	unset($_GET['url']);
+	$_GET['component'] = "Article";														// TODO: This is now hard set, changes when languages come around
+	$_GET['id'] = "2";
+} elseif(isset($_GET['image']) && isset($_GET['name'])) {
+	include($_SERVER['DOCUMENT_ROOT']."/lib/php/file.php");
+	exit();
+}
 
+if(empty($_GET['url'])) {
+	if(empty($_GET['id'])) {
+		// Home page
+	} else {
+		if(isset($_GET['component'])) {
+			$_content = new $_GET['component']($_GET['id']);
+			if(empty($_content))
+				trigger_error("Component cannot be fount at ".__FILE__,E_USER_ERROR);	// Something was wrong: this component does not exist
+		} else {
+			// Now what?
+		}
+	}
+} else {
+	$_breadcrumbs = process_url($_GET['url']);
+}
+
+/*
 // Process query string
 $_language = new Language(@$_GET['lang'],'1');																	// If no ?lang= is given, then default to the first defined (default) language
 $_mainmenu = new Menu("`main` AND `language`='{$_language->getId()}'");											// Retrieve the main menu for the specified language
@@ -77,6 +104,7 @@ if(isset($_GET['menu'])) {
 if(!$_article->exists()) {
 	trigger_error("There must be something really wrong here at ".__FILE__,E_USER_ERROR);
 }
+*/
 
 // Load template
 $_template = new Template($_settings->template);
@@ -93,4 +121,4 @@ foreach($plugins as $plugin) {
 $_db->disconnect();
 
 echo $html;
-?>>
+?>
